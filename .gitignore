@@ -1,0 +1,8 @@
+# ignore all output files
+*.out
+
+#ignore generated data
+data/features/*
+data/measures/*
+data/network/*
+data/*.csv
