@@ -12,7 +12,7 @@
 #include"lib/cuda_common.cuh"
 
 
-void generate_teps(Graph *G, int steps, char* file_name);
+void generate_teps(Graph *G, int steps, char* file_name, bool* init_state);
 
 __global__ void evolve_tep_gpu(bool* TEP, rules* bRules, int counterB, rules* sRules, float* density, 
 double* resolution, int* degree, int* adjList, int* indexes, int* sum_of_states,
@@ -27,6 +27,8 @@ __global__ void population(bool* TEP, int steps, int number_of_nodes, int counte
 
 __global__ void tp_correlation(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes, float* correlation);
 
+bool* createRandomInitState(int number_of_nodes);
+
 arr_adjList* generate_gpu_adjlist(Graph* G);
 
 int main(void){
@@ -38,6 +40,9 @@ int main(void){
     DIR *d;
     d = opendir(dir_path);
     int counter =1;
+    int MAX_NODES = 2000;
+
+    bool* init_state = createRandomInitState(MAX_NODES);
 
     FILE *chkp = fopen("data/checkpoint.csv", "r");
     int check;
@@ -53,11 +58,9 @@ int main(void){
                     strcpy(file_path,dir_path);
                     strcat(file_path, dir->d_name);
 
-                    
-
                     Graph* G = read_adjList(file_path);
 
-                    generate_teps(G, steps, dir->d_name);
+                    generate_teps(G, steps, dir->d_name, init_state);
 
             
                     free(file_path);
@@ -73,13 +76,24 @@ int main(void){
             
         }
     }
+    free(init_state);
     closedir(d);
 
     return 0;
 }
 
 
-void generate_teps(Graph *G, int steps, char* file_name){
+bool* createRandomInitState(int number_of_nodes){
+    bool* init_state = (bool*) malloc(sizeof(bool)*number_of_nodes);
+
+    for(int i=0;i<number_of_nodes;i++){
+        init_state[i] = rand()&1;
+    }
+
+    return init_state;
+}
+
+void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
 
     //in this function, we will use a number of threads equivalent to the number of survive rules
     //for example, for 8 neighbors, there will be 512 survive rules. Since a graph has n nodes and each node 
@@ -117,6 +131,7 @@ void generate_teps(Graph *G, int steps, char* file_name){
     free(bRules);
     free(sRules);
 
+
     //resolution of densities to calculate the rules
     double* resolution = (double*)malloc(sizeof(double) * (NB_SIZE + 2));
 
@@ -130,13 +145,6 @@ void generate_teps(Graph *G, int steps, char* file_name){
     gpuErrchk(cudaMemcpy(gpu_resolution, resolution, sizeof(double)*(NB_SIZE+2), cudaMemcpyHostToDevice));
 
     free(resolution);
-
-    //determine initial state for all TEPs
-    bool* init_state = (bool*) malloc(sizeof(bool)*G->numVertices);
-
-    for(int i=0;i<G->numVertices;i++){
-        init_state[i] = rand()&1;
-    }
 
     //calculate initial density for all nodes
     int* alive_neighbors = (int*) malloc(sizeof(int)*number_of_nodes);
@@ -170,7 +178,6 @@ void generate_teps(Graph *G, int steps, char* file_name){
         }
     }
 
-
     free(alive_neighbors);
 
     //since we are working with (number_of_nodes*number_of_survive_rules) number of threads, in order to reduce
@@ -189,8 +196,6 @@ void generate_teps(Graph *G, int steps, char* file_name){
         gpuErrchk(cudaMemcpy(&gpu_TEP[i*G->numVertices*steps], &init_state[0], 
         sizeof(bool)*number_of_nodes, cudaMemcpyHostToDevice));
     }
-
-    free(init_state);
 
     //also, create arrays for both degree and density. Since density is dinamically updated, we will extend
     //the array to be the block size. Note that there is no need to do this for the degree array, since
@@ -269,7 +274,7 @@ void generate_teps(Graph *G, int steps, char* file_name){
 
     //loop for B rules from 0 to 2^(Number of neighbors)
     for(int counterB=0;counterB<512;counterB++){
-        printf("\nBirth Rule Number: %d\n", counterB);
+        //printf("\nBirth Rule Number: %d\n", counterB);
         
         evolve_tep_gpu <<<block, grid>>> (gpu_TEP, gpu_bRules, counterB, gpu_sRules, gpu_density, gpu_resolution,
         gpu_degree, gpu_adjList, gpu_indexes, gpu_sum_of_states, rules_size, G->numVertices, steps);
