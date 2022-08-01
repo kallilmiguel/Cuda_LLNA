@@ -3,6 +3,7 @@
 #include<dirent.h>
 #include<string.h>
 #include<math.h>
+#include<ctype.h>
 
 typedef struct node{
     int vertex;
@@ -13,6 +14,7 @@ typedef struct{
     int numVertices;
     int numTransitions;
     node** adjLists;
+    int* degrees;
 }Graph;
 
 typedef struct{
@@ -44,29 +46,57 @@ Graph* createGraph(int vertices){
     graph->numTransitions = 0;
 
     graph->adjLists = (node**) malloc(vertices * sizeof(node*));
+    graph->degrees = (int*) malloc(vertices*sizeof(int));
 
     int i;
     for(i=0; i<vertices;i++){
         graph->adjLists[i] = NULL;
+        graph->degrees[i] = 0;
     }
 
     return graph;
 }
 
+bool hasEdge(Graph* G, int source, int destiny){
+    node* p = G->adjLists[source];
+    while(p){
+        if(p->vertex == destiny){
+            return true;
+        }
+        p = p->next;
+    }
+    return false;
+}
+
 //Add edge (in bidirectional graph)
 void addEdge(Graph* graph, int source, int destiny){
-    //add edge from s to d
-    node* newNode = createNode(destiny);
-    newNode->next = graph->adjLists[source];
-    graph->adjLists[source] = newNode;
-    
-    //add edge from d to s
-    node* newNode2 = createNode(source);
-    newNode2->next = graph->adjLists[destiny];
-    graph->adjLists[destiny] = newNode2;
+    // if(!hasEdge(graph, source, destiny)){
+        //add edge from s to d
+        node* newNode = createNode(destiny);
+        newNode->next = graph->adjLists[source];
+        graph->adjLists[source] = newNode;
+        graph->degrees[source]++;
+        
+        //add edge from d to s
+        // node* newNode2 = createNode(source);
+        // newNode2->next = graph->adjLists[destiny];
+        // graph->adjLists[destiny] = newNode2;
 
-    graph->numTransitions++;
-    
+        graph->numTransitions++;
+    // }
+}
+
+void freeGraph(Graph* graph){
+    for(int i=0;i<graph->numVertices;i++){
+        node*p = graph->adjLists[i];
+        while(p){
+            node *a = p;
+            p = p->next;
+            free(a);
+        }
+    }
+    free(graph);
+    return;
 }
 
 //print the graph
@@ -91,6 +121,19 @@ Graph* read_adjList(char* path){
 
     int counter = 0;
     int lines_until_vertex_read=0;
+
+    while(1){
+        char c = fgetc(f);
+        if(isdigit(c)){
+            break;
+        }
+        else{
+            while(fgetc(f) != '\n');
+            lines_until_vertex_read++;
+        }
+    }
+
+    rewind(f);
 
     while(1){
         char c = fgetc(f);
@@ -120,24 +163,31 @@ Graph* read_adjList(char* path){
     while(fgets(str,10000, f)!= NULL){
         int vertex;
         if(str[0] != '#'){
-            sscanf(str,"%d", &vertex);
+            sscanf(str,"%d ", &vertex);
             int edge;
             int char_offset;
             int size = strlen(str);
+            int previous=-1;
             if(vertex >1){
-                char_offset = 1+ceil(log10((double)vertex));
+                char_offset = 1+ceil(log10((double)vertex+0.001));
             }
             else{
                 char_offset = 2;
             }
+            //printf("\n %d ->", vertex);
             while(sscanf(&str[char_offset], "%d \n", &edge)!= NULL && char_offset< size){
-                if(edge > 1){
-                    char_offset += 1+ceil(log10((double)edge)); 
+                if(previous == edge){
+                    break;
+                }
+                else if(edge > 1){
+                    char_offset += 1+ceil(log10((double)edge+0.001)); 
                 }
                 else{
                     char_offset +=2;
                 }
+                previous = edge;
                 addEdge(G, vertex, edge);
+                //addEdge(G, edge, vertex);
             }
         }
     }

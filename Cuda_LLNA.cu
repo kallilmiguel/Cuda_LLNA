@@ -4,12 +4,15 @@
 #include<math.h>
 #include<dirent.h>
 #include"lib/graph.h"
-#include"lib/rules.h"
+//#include"lib/rules.h"
+#include"lib/filesave.h"
 
 #include"cuda.h"
 #include"cuda_runtime.h"
 #include"device_launch_parameters.h"
 #include"lib/cuda_common.cuh"
+#include"lib/statistics.cuh"
+#include"lib/tep.cuh"
 
 
 void generate_teps(Graph *G, int steps, char* file_name, bool* init_state);
@@ -17,15 +20,6 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state);
 __global__ void evolve_tep_gpu(bool* TEP, rules* bRules, int counterB, rules* sRules, float* density, 
 double* resolution, int* degree, int* adjList, int* indexes, int* sum_of_states,
 int rules_size, int number_of_nodes, int steps);
-
-__global__ void shannon_entropy(int* sum_of_states, int steps, int number_of_nodes, int counterB,
-int* histogram, int attributes);
-
-__global__ void word_entropy_histogram(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes, int* histogram);
-
-__global__ void population(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes, float* population);
-
-__global__ void tp_correlation(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes, float* correlation);
 
 bool* createRandomInitState(int number_of_nodes);
 
@@ -44,7 +38,7 @@ int main(void){
 
     bool* init_state = createRandomInitState(MAX_NODES);
 
-    FILE *chkp = fopen("data/checkpoint.csv", "r");
+    FILE *chkp = fopen("data/checkpoint.txt", "r");
     int check;
     fscanf(chkp, "%d", &check);
     fclose(chkp);
@@ -68,7 +62,7 @@ int main(void){
                 }
                 
                 counter++;
-                chkp = fopen("data/checkpoint.csv", "w");
+                chkp = fopen("data/checkpoint.txt", "w");
                 fprintf(chkp, "%d", counter); 
                 fclose(chkp);
 
@@ -117,7 +111,6 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
     rules* bRules = getAllRules();
     rules* sRules = getAllRules();
 
-    
     //allocate memory for gpu
     rules* gpu_bRules;
     rules* gpu_sRules;
@@ -167,13 +160,18 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
     for(int i=0;i<G->numVertices;i++){
         if(alive_neighbors[i]==0){
             for(int j=0;j<rules_size; j++){
-                density[i+j*number_of_nodes]=0;
+                density[i+j*G->numVertices]=0;
             }
             
         }
         else{
             for(int j=0;j<rules_size; j++){
-                density[i+j*number_of_nodes] = (float)alive_neighbors[i]/(float)degree[i];
+                if(degree[i] != 0){
+                    density[i+j*G->numVertices] = (float)alive_neighbors[i]/(float)degree[i];
+                }
+                else{
+                    density[i+j*G->numVertices] = 0;
+                }
             }
         }
     }
@@ -208,7 +206,7 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
 
     //copy host values to device arrays
     gpuErrchk(cudaMemcpy(gpu_degree, degree, sizeof(int)*number_of_nodes, cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(gpu_density, density, sizeof(float)*number_of_nodes, cudaMemcpyHostToDevice)); 
+    gpuErrchk(cudaMemcpy(gpu_density, density, sizeof(float)*number_of_nodes*rules_size, cudaMemcpyHostToDevice)); 
     //free memory for host arrays
     free(degree);
 
@@ -284,10 +282,10 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
         gpu_shannon_histogram, attributes);
         gpuErrchk(cudaDeviceSynchronize());
 
-        population <<<block, steps>>> (gpu_TEP, steps, G->numVertices, counterB, rules_size, attributes, gpu_population);
+        population <<<block, grid>>> (gpu_TEP, steps, G->numVertices, counterB, rules_size, attributes, gpu_population);
         gpuErrchk(cudaDeviceSynchronize());
 
-        word_entropy_histogram <<<block, grid>>> (gpu_TEP, steps, G->numVertices, counterB, rules_size, attributes, gpu_word_histogram);
+        word_entropy_histogram <<<block, grid>>> (gpu_TEP, steps, G->numVertices, counterB, rules_size, attributes, 40, gpu_word_histogram);
         gpuErrchk(cudaDeviceSynchronize());
 
         tp_correlation <<<block, steps>>> (gpu_TEP, steps, G->numVertices, counterB, rules_size, attributes, gpu_correlation);
@@ -310,105 +308,18 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
     gpuErrchk(cudaMemcpy(cpu_correlation, gpu_correlation, sizeof(float)*rules_size*rules_size*attributes, cudaMemcpyDeviceToHost));
 
     //write file with results of shannon entropy
-    FILE *fout_shannon;
-    char* path = "data/measures/shannon/";
-    char* pout = (char*) malloc(sizeof(char)*(50));
-    char* file_wo_ext = (char*) malloc(sizeof(char)*(50));
-    char* ext = ".csv";
-    snprintf(file_wo_ext, strlen(file_name)-3, "%s", file_name);
-    strcat(file_wo_ext, ext);
-    strcpy(pout, path);
-    strcat(pout, file_wo_ext);
-
-    fout_shannon = fopen(pout, "w");
-    printf("Save name: %s\n", pout);
-    for(int i=0;i<rules_size*rules_size*attributes;i++){
-        if((i+1)%attributes==0){
-            fprintf(fout_shannon, "%d\n", cpu_shannon_histogram[i]);
-        }
-        else{
-            fprintf(fout_shannon, "%d,", cpu_shannon_histogram[i]);
-        }
-    }
-    
-    fclose(fout_shannon);
+    save_csv_int(file_name,"data/measures/shannon/",cpu_shannon_histogram, attributes, rules_size*rules_size);
 
     //write file with results of word entropy
-    FILE *fout_word;
-    path = "data/measures/word/";
-    pout = (char*) malloc(sizeof(char)*(50));
-    file_wo_ext = (char*) malloc(sizeof(char)*(50));
-    ext = ".csv";
-    snprintf(file_wo_ext, strlen(file_name)-3, "%s", file_name);
-    strcat(file_wo_ext, ext);
-    strcpy(pout, path);
-    strcat(pout, file_wo_ext);
-
-    fout_word = fopen(pout, "w");
-    printf("Save name: %s\n", pout);
-    for(int i=0;i<rules_size*rules_size*attributes;i++){
-        if((i+1)%attributes==0){
-            fprintf(fout_word, "%d\n", cpu_word_histogram[i]);
-        }
-        else{
-            fprintf(fout_word, "%d,", cpu_word_histogram[i]);
-        }
-    }
-    
-    fclose(fout_word);
+    save_csv_int(file_name,"data/measures/word/",cpu_word_histogram, attributes, rules_size*rules_size);
 
     //write file with results of population
-    FILE *fout_pop;
-    path = "data/measures/population/";
-    pout = (char*) malloc(sizeof(char)*(50));
-    file_wo_ext = (char*) malloc(sizeof(char)*(50));
-    ext = ".csv";
-    snprintf(file_wo_ext, strlen(file_name)-3, "%s", file_name);
-    strcat(file_wo_ext, ext);
-    strcpy(pout, path);
-    strcat(pout, file_wo_ext);
-
-    fout_pop = fopen(pout, "w");
-    printf("Save name: %s\n", pout);
-    for(int i=0;i<rules_size*rules_size*attributes;i++){
-        if((i+1)%attributes==0){
-            fprintf(fout_pop, "%.4f\n", cpu_population[i]);
-        }
-        else{
-            fprintf(fout_pop, "%.4f,", cpu_population[i]);
-        }
-    }
-    
-    fclose(fout_pop);
+    save_csv_float(file_name,"data/measures/population/",cpu_population, attributes, rules_size*rules_size);
 
     //write file with results of population
-    FILE *fout_cor;
-    path = "data/measures/correlation/";
-    pout = (char*) malloc(sizeof(char)*(50));
-    file_wo_ext = (char*) malloc(sizeof(char)*(50));
-    ext = ".csv";
-    snprintf(file_wo_ext, strlen(file_name)-3, "%s", file_name);
-    strcat(file_wo_ext, ext);
-    strcpy(pout, path);
-    strcat(pout, file_wo_ext);
-
-    fout_cor = fopen(pout, "w");
-    printf("Save name: %s\n", pout);
-    for(int i=0;i<rules_size*rules_size*attributes;i++){
-        if((i+1)%attributes==0){
-            fprintf(fout_pop, "%.4f\n", cpu_correlation[i]);
-        }
-        else{
-            fprintf(fout_pop, "%.4f,", cpu_correlation[i]);
-        }
-    }
-    
-    fclose(fout_cor);
-
+    save_csv_float(file_name,"data/measures/correlation/",cpu_correlation, attributes, rules_size*rules_size);
 
     //free remaining allocated memory from host and device
-    //free(pout);
-    //free(file_wo_ext);
     free(TEP);
     free(cpu_shannon_histogram);
     cudaFree(gpu_sum_of_states);
@@ -428,179 +339,4 @@ void generate_teps(Graph *G, int steps, char* file_name, bool* init_state){
     cudaFree(gpu_population);
     free(cpu_word_histogram);
     cudaFree(gpu_word_histogram);
-}
-
-
-__global__ void evolve_tep_gpu(bool* TEP, rules* bRules, int counterB, rules* sRules, float* density, 
-    double* resolution, int* degree, int* adjList, int* indexes, int* sum_of_states,  int rules_size, 
-    int number_of_nodes, int steps){
-
-    int gid = blockDim.x*blockIdx.x + threadIdx.x;
-    int rule_number = gid/number_of_nodes;
-    int node_number = gid % number_of_nodes;
-    int rule_offset = number_of_nodes*steps;
-
-    sum_of_states[gid] = 0;
-
-    for(int i=1;i<steps;i++){
-        TEP[node_number+i*number_of_nodes+rule_number*rule_offset] = false;      
-        //birth rule dominates
-        if(TEP[node_number+(i-1)*number_of_nodes+rule_number*rule_offset]==false){
-            for(int k=0;k < NB_SIZE+1; k++){
-                if(bRules[counterB].rule[k] == true &&
-                density[node_number + number_of_nodes*rule_number] >= resolution[k] &&
-                density[node_number + number_of_nodes*rule_number] < resolution[k+1]){
-                    TEP[rule_number*rule_offset + node_number+ i*number_of_nodes] = true;
-                    sum_of_states[node_number+number_of_nodes*rule_number] += 1;
-                    for(int d=0; d<degree[node_number]; d++){
-                        atomicAdd(&density[adjList[indexes[node_number]+d]+number_of_nodes*rule_number], 1/(float)degree[adjList[indexes[node_number]+d]]);
-                    }
-                    break;
-                }
-            }
-        } 
-        else{
-            for(int k=0;k < NB_SIZE+1; k++){
-                if(sRules[rule_number].rule[k] == true &&
-                density[node_number + number_of_nodes*rule_number] >= resolution[k] &&
-                density[node_number + number_of_nodes*rule_number] < resolution[k+1]){
-                    TEP[rule_number*rule_offset + node_number+ i*number_of_nodes] = true;
-                    sum_of_states[node_number+number_of_nodes*rule_number] += 1;
-                    break;
-                }
-            }
-            if(TEP[node_number+i*number_of_nodes+rule_number*rule_offset] == false){
-                for(int d=0; d<degree[node_number]; d++){
-                    atomicAdd(&density[adjList[indexes[node_number]+d]+number_of_nodes*rule_number], -1/(float)degree[adjList[indexes[node_number]+d]]);
-                }
-            }
-        }
-        __syncthreads();
-    }
-}
-
-
-__global__ void shannon_entropy(int* sum_of_states, int steps, int number_of_nodes, int counterB,
-    int* histogram, int attributes){
-    
-    int gid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int rules_size=512;
-    int size_of_batch = rules_size*attributes;
-    int offset = gid / number_of_nodes;
-    float division = (float)1/(float)attributes + 0.00001;
-    
-    if(gid < rules_size*number_of_nodes){
-        int sum = sum_of_states[gid];
-        float p1 = (float) sum/(float)steps;
-        float p0 = (float)(steps-sum) / (float)steps;
-        float value = (-1) * (p1 * log2f(p1+0.001) + p0 * log2f(p0+0.001));
-        int index = (int) (value/division);
-        atomicAdd(&histogram[index+attributes*offset+counterB*size_of_batch],1);
-        __syncthreads();
-    }
-}
-
-//requires rules_size*steps to calculate. To avoid concurrency, every thread will calculate the population
-// a timestep
-__global__ void population(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes, float* population){
-    //population -> size attributes*rules_size
-
-    int gid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int rule_offset = rules_size*counterB*attributes;
-    int resolution = steps/attributes;
-    int step_idx = gid % steps;
-    int rule_idx = gid / (number_of_nodes*steps);
-
-    
-
-    if(gid < attributes*rules_size){
-        population[gid+rule_offset] = 0; 
-        for(int i=0;i<number_of_nodes;i++){
-            population[gid+rule_offset]+=(float)TEP[step_idx*resolution*number_of_nodes+steps*number_of_nodes*rule_idx+i]/(float)number_of_nodes;
-        }
-        __syncthreads();
-    }
-    
-}
-
-// calculate word entropy histogram, this histogram has 20 indexes. Larger word length considered is 40 and every index in the
-// histogram has 2 bins.
-__global__ void word_entropy_histogram(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes,  int* histogram){
-   
-    int gid = blockIdx.x*blockDim.x+threadIdx.x;
-
-    int size_of_batch = rules_size*attributes;
-    int rule_offset = rules_size*counterB*attributes;
-    int node_idx = gid % number_of_nodes;
-    int rule_idx = gid / number_of_nodes;
-
-    if(gid < rules_size*number_of_nodes){
-        int word_size=0;
-        for(int i=0;i<steps;i++){
-            if(TEP[node_idx + i*number_of_nodes + rule_idx*number_of_nodes*steps] == false){
-                if(word_size > 0 && word_size <=40){
-                    int index = word_size/2.001;
-                    atomicAdd(&histogram[index+rule_idx*attributes+rule_offset], 1);
-                }
-                word_size=0;
-            }
-            else{
-                word_size+=1;
-            }
-        }
-        __syncthreads();
-    }
-    
-
-}
-
-//pick the sum_of_states array to make the two point correlation. We pick values for r between 1 and 20, we paralelize it for each thread to calculate every step
-__global__ void tp_correlation(bool* TEP, int steps, int number_of_nodes, int counterB, int rules_size, int attributes, float* correlation){
-    
-    int gid = blockIdx.x*blockDim.x + threadIdx.x;
-
-    int size_of_batch = rules_size*counterB*attributes;
-    int step_idx = gid % steps;
-    int rule_idx = gid / steps;
-
-    if(gid < rules_size*steps){
-        for(int r = 1; r<= attributes;r++){
-            int counter=0;
-            int prod = 0;
-            int sum_m = 0;
-            int sum_r = 0;
-            for(int i=0;i<number_of_nodes-r;i++){
-                int value_m;
-                int value_r;
-                if(TEP[i + step_idx*number_of_nodes + rule_idx*number_of_nodes*steps]){
-                    value_m = 1;
-                }
-                else{
-                    value_m = -1;
-                }
-                if(TEP[i+r + step_idx*number_of_nodes + rule_idx*number_of_nodes*steps]){
-                    value_r = 1;
-                }
-                else{
-                    value_r = -1;
-                }
-
-                sum_m+=value_m;
-                sum_r+=value_r;
-                prod+=value_m*value_r;
-                counter++;
-            }
-            float mean_prod = (float) prod/(float)counter;
-            float mean_m = (float) sum_m/(float)counter;
-            float mean_r = (float)sum_r/(float)counter;
-
-            float value = (mean_prod - mean_m*mean_r)/steps;
-
-            atomicAdd(&correlation[r-1 + rule_idx*attributes + size_of_batch], value);    
-        }     
-        __syncthreads();  
-    }
-    
 }

@@ -8,7 +8,7 @@ DATA_PATH = "../data/network/full-dataset/"
 OUT_PATH = "../data/rulesel/"
 
 N = [500]
-K = [8]
+K = [4]
 networks_per_config = 10
 
 for n in N:

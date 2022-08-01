@@ -1,8 +1,8 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<dirent.h>
-#include"graph.h"
-#include"rules.h"
+#include"lib/graph.h"
+#include"lib/rules.h"
 
 #define NB_SIZE 8
 
@@ -11,7 +11,6 @@ bool* evolve_single_tep(Graph *G, rules bRules, rules sRules,bool* init_state, d
     double* resolution, int* degree, int steps);
 
 int main(void){
-
     int steps=350;
 
     struct dirent *dir;

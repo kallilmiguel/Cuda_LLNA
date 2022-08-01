@@ -7,6 +7,7 @@ import seaborn as sns
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import StandardScaler
 
 def calculate_label_acc(labels):
     total_samples = 2**18
@@ -19,11 +20,11 @@ def calculate_label_acc(labels):
 
 # %%
 
-DATA_PATH = "data/features/net-split/"
+DATA_PATH = "../data/features/same_config_k=4/"
 
 networks = ["erdos", "watts", "barabasi", "geo"]
 
-KMAX = 20
+KMAX = 10
 
 # %%
 for network in networks:
@@ -34,11 +35,15 @@ for network in networks:
         labels = []
         for file in files:
             df = pd.read_csv(DATA_PATH+file)
-            X = df.iloc[:,1:].values
+            X = df.iloc[1:,1:].values
+            
+            scaler = StandardScaler()
 
-            kmeans = KMeans(n_clusters=k, random_state=0)  
-            kmeans.fit(X=X)
-            labels.append(kmeans.labels_)
+            X = scaler.fit_transform(X)
+
+            kmeans = KMeans(n_clusters=k)  
+            clusters = kmeans.fit_predict(X=X)
+            labels.append(clusters)
 
 
         accuracies.append(np.mean(calculate_label_acc(labels)))

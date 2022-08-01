@@ -19,11 +19,11 @@ def calculate_label_acc(labels):
 
 # %%
 
-DATA_PATH = "../data/features/experiment2/"
+DATA_PATH = "../data/features/experiment3/"
 
 networks = ["erdos", "watts", "barabasi", "geo"]
 
-KMAX = 20
+KMAX = 10
 
 # %%
 for network in networks:
@@ -33,8 +33,8 @@ for network in networks:
     for k in range(2, KMAX+1):
         labels = []
         for file in files:
-            df = pd.read_csv(DATA_PATH+file)
-            X = df.iloc[:,1:].values
+            df = pd.read_csv(DATA_PATH+file, header=None)
+            X = df.iloc[1:,1:].values
 
             kmeans = KMeans(n_clusters=k, random_state=0)  
             kmeans.fit(X=X)

@@ -6,3 +6,5 @@ data/features/*
 data/measures/*
 data/network/*
 data/*.csv
+
+data/*

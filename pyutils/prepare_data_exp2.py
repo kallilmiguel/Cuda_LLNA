@@ -9,15 +9,13 @@ import matplotlib.pyplot as plt
 # This file is responsible to pick ten examples of a network configuration with a fixed number of N nodes and
 # K mean degree. This is done for all 4 types of networks
 # %%
-DATA_PATH = "../data/measures/experiment2/"
-OUT_PATH = "../data/features/experiment2/"
+DATA_PATH = "../data/measures/same_config_k=4/"
+OUT_PATH = "../data/features/same_config_k=4/"
 SINGLE_CSV_PATH = "../data/features/"
 number_of_rules = 2**18
 
-N = [500]
-K = [8]
 networks = ["watts", "erdos", "barabasi", "geo"]
-measures = ["shannon"]
+measures = ["population"]
 folders = []
 
 for folder in os.listdir(DATA_PATH):
@@ -40,7 +38,7 @@ for net in networks:
             df = pd.read_csv(DATA_PATH+folders[0]+'/'+file, header=None)
             for folder in folders[1:]:
                 df = pd.concat([df, pd.read_csv(DATA_PATH+folder+'/'+file, header=None)], axis='columns')
-            df.to_csv(OUT_PATH+net+ f'_i={counter}.csv')
+            df.to_csv(OUT_PATH+folders[0]+'_'+net+ f'_i={counter}.csv', header=None)
 
 #%% save every file in dataframe and write into csv file
 for net in networks:
